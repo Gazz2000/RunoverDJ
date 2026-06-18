@@ -1,11 +1,486 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Hello World</title>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<title>RunoverDJ</title>
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+
+  body {
+    background: #0d0d0d;
+    color: #f0f0f0;
+    font-family: 'Segoe UI', system-ui, sans-serif;
+    min-height: 100vh;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    padding: 20px;
+    gap: 16px;
+  }
+
+  h1 {
+    font-size: 1.4rem;
+    font-weight: 300;
+    letter-spacing: 0.2em;
+    color: #888;
+    text-transform: uppercase;
+  }
+
+  /* Band display */
+  #band-display {
+    text-align: center;
+    padding: 16px 32px;
+    border-radius: 12px;
+    background: #1a1a1a;
+    width: 100%;
+    max-width: 400px;
+    transition: background 0.8s;
+  }
+  #band-name {
+    font-size: 2rem;
+    font-weight: 700;
+    letter-spacing: 0.05em;
+  }
+  #score-display {
+    font-size: 0.9rem;
+    color: #888;
+    margin-top: 4px;
+  }
+
+  /* Band colours */
+  .band-chill      { background: #0d1f2d !important; color: #4fc3f7; }
+  .band-warmup     { background: #1a2a1a !important; color: #81c784; }
+  .band-steady     { background: #2a2a0d !important; color: #fff176; }
+  .band-push       { background: #2a1a0d !important; color: #ffb74d; }
+  .band-beastmode  { background: #2a0d0d !important; color: #ef5350; }
+
+  /* Load + play controls */
+  .controls {
+    display: flex;
+    gap: 12px;
+    width: 100%;
+    max-width: 400px;
+    align-items: center;
+  }
+
+  label.file-btn {
+    flex: 1;
+    background: #1e1e1e;
+    border: 1px solid #333;
+    border-radius: 8px;
+    padding: 12px;
+    text-align: center;
+    cursor: pointer;
+    font-size: 0.85rem;
+    color: #aaa;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+  label.file-btn:hover { border-color: #555; }
+  #file-input { display: none; }
+
+  button {
+    width: 56px;
+    height: 56px;
+    border-radius: 50%;
+    border: none;
+    background: #333;
+    color: #fff;
+    font-size: 1.4rem;
+    cursor: pointer;
+    flex-shrink: 0;
+    transition: background 0.2s;
+  }
+  button:hover { background: #444; }
+  button:disabled { opacity: 0.3; cursor: default; }
+  button.playing { background: #c0392b; }
+
+  /* Sliders */
+  .panel {
+    background: #1a1a1a;
+    border-radius: 12px;
+    padding: 16px;
+    width: 100%;
+    max-width: 400px;
+  }
+  .panel h2 {
+    font-size: 0.75rem;
+    text-transform: uppercase;
+    letter-spacing: 0.15em;
+    color: #555;
+    margin-bottom: 14px;
+  }
+
+  .slider-row {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    margin-bottom: 12px;
+  }
+  .slider-row:last-child { margin-bottom: 0; }
+  .slider-label {
+    width: 60px;
+    font-size: 0.8rem;
+    color: #888;
+    flex-shrink: 0;
+  }
+  input[type=range] {
+    flex: 1;
+    height: 6px;
+    -webkit-appearance: none;
+    appearance: none;
+    background: #333;
+    border-radius: 3px;
+    outline: none;
+  }
+  input[type=range]::-webkit-slider-thumb {
+    -webkit-appearance: none;
+    width: 22px;
+    height: 22px;
+    border-radius: 50%;
+    background: #e74c3c;
+    cursor: pointer;
+  }
+  .slider-value {
+    width: 54px;
+    font-size: 0.8rem;
+    color: #aaa;
+    text-align: right;
+    flex-shrink: 0;
+  }
+
+  .heat-score-row {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+  }
+  #heat-slider {
+    flex: 1;
+    height: 8px;
+    -webkit-appearance: none;
+    appearance: none;
+    background: linear-gradient(to right, #4fc3f7, #81c784, #fff176, #ffb74d, #ef5350);
+    border-radius: 4px;
+  }
+  #heat-slider::-webkit-slider-thumb {
+    -webkit-appearance: none;
+    width: 28px;
+    height: 28px;
+    border-radius: 50%;
+    background: #fff;
+    cursor: pointer;
+    box-shadow: 0 2px 6px rgba(0,0,0,0.5);
+  }
+
+  #status {
+    font-size: 0.75rem;
+    color: #555;
+    text-align: center;
+  }
+</style>
 </head>
 <body>
-    <h1>Hello World</h1>
+
+<h1>RunoverDJ</h1>
+
+<!-- Band / score display -->
+<div id="band-display" class="band-chill">
+  <div id="band-name">Load a track</div>
+  <div id="score-display">Heat score: 0</div>
+</div>
+
+<!-- File loader + play button -->
+<div class="controls">
+  <label class="file-btn" for="file-input" id="file-label">
+    📂 Choose MP3
+  </label>
+  <input type="file" id="file-input" accept="audio/*">
+  <button id="play-btn" disabled>▶</button>
+</div>
+
+<!-- Heat score slider -->
+<div class="panel">
+  <h2>Heat Score (drag to simulate intensity)</h2>
+  <div class="heat-score-row">
+    <span style="font-size:0.8rem;color:#555">0</span>
+    <input type="range" id="heat-slider" min="0" max="3000" value="0">
+    <span style="font-size:0.8rem;color:#555">3000</span>
+  </div>
+</div>
+
+<!-- Manual effect overrides -->
+<div class="panel">
+  <h2>Effects (auto-set by heat score — drag to override)</h2>
+
+  <div class="slider-row">
+    <span class="slider-label">Filter</span>
+    <input type="range" id="filter-slider" min="200" max="20000" value="200">
+    <span class="slider-value" id="filter-val">200 Hz</span>
+  </div>
+
+  <div class="slider-row">
+    <span class="slider-label">Reverb</span>
+    <input type="range" id="reverb-slider" min="0" max="100" value="90">
+    <span class="slider-value" id="reverb-val">90%</span>
+  </div>
+
+  <div class="slider-row">
+    <span class="slider-label">Tempo</span>
+    <input type="range" id="tempo-slider" min="80" max="120" value="90">
+    <span class="slider-value" id="tempo-val">−10%</span>
+  </div>
+</div>
+
+<div id="status">Load an MP3 to begin</div>
+
+<script>
+// ─────────────────────────────────────────────
+// HEAT SCORE BANDS (ported from heat_score.py)
+// ─────────────────────────────────────────────
+const BANDS = [
+  { name: "Chill",      cls: "band-chill",     min: 0,    max: 600,  filterHz: 200,   reverb: 0.9, tempoPct: -10 },
+  { name: "Warmup",     cls: "band-warmup",    min: 600,  max: 1200, filterHz: 800,   reverb: 0.6, tempoPct: -5  },
+  { name: "Steady",     cls: "band-steady",    min: 1200, max: 1800, filterHz: 2000,  reverb: 0.3, tempoPct: 0   },
+  { name: "Push",       cls: "band-push",      min: 1800, max: 2400, filterHz: 5000,  reverb: 0.1, tempoPct: 5   },
+  { name: "Beast Mode", cls: "band-beastmode", min: 2400, max: 9999, filterHz: 20000, reverb: 0.0, tempoPct: 10  },
+];
+
+function lerp(a, b, t) { return a + (b - a) * t; }
+
+function getEffects(score) {
+  for (let i = 0; i < BANDS.length; i++) {
+    const band = BANDS[i];
+    if (score <= band.max) {
+      const t = Math.max(0, Math.min(1, (score - band.min) / (band.max - band.min)));
+      const next = BANDS[i + 1] || band;
+      return {
+        band,
+        filterHz: lerp(band.filterHz, next.filterHz, t),
+        reverb:   lerp(band.reverb,   next.reverb,   t),
+        tempoPct: lerp(band.tempoPct, next.tempoPct,  t),
+      };
+    }
+  }
+  return { band: BANDS[4], filterHz: 20000, reverb: 0, tempoPct: 10 };
+}
+
+// ─────────────────────────────────────────────
+// WEB AUDIO SETUP
+// ─────────────────────────────────────────────
+let audioCtx, sourceNode, filterNode, dryGain, wetGain, convolver;
+let audioBuffer = null;
+let isPlaying = false;
+let startTime = 0;
+let pauseOffset = 0;
+
+function buildAudioGraph() {
+  audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+
+  // Low-pass filter — this is the main "energy" control
+  filterNode = audioCtx.createBiquadFilter();
+  filterNode.type = "lowpass";
+  filterNode.frequency.value = 200;
+  filterNode.Q.value = 0.8;
+
+  // Reverb via convolver with a synthetic impulse response.
+  // Theory: a real room's reverb is characterised by its impulse response —
+  // how the room responds to a single click. We fake this with decaying noise.
+  convolver = audioCtx.createConvolver();
+  convolver.buffer = makeImpulse(audioCtx, 2.5, 3.0);
+
+  // Wet/dry gains control how much reverb we blend in
+  dryGain = audioCtx.createGain();
+  wetGain = audioCtx.createGain();
+  dryGain.gain.value = 1.0;
+  wetGain.gain.value = 0.0;
+
+  // Graph: filter → dry path + wet (reverb) path → output
+  filterNode.connect(dryGain);
+  filterNode.connect(convolver);
+  convolver.connect(wetGain);
+  dryGain.connect(audioCtx.destination);
+  wetGain.connect(audioCtx.destination);
+}
+
+function makeImpulse(ctx, duration, decay) {
+  // Generate exponentially-decaying white noise as a reverb impulse response.
+  // Longer duration = bigger room feel. Higher decay = faster fadeout.
+  const rate   = ctx.sampleRate;
+  const length = Math.floor(rate * duration);
+  const buffer = ctx.createBuffer(2, length, rate);
+  for (let ch = 0; ch < 2; ch++) {
+    const data = buffer.getChannelData(ch);
+    for (let i = 0; i < length; i++) {
+      data[i] = (Math.random() * 2 - 1) * Math.pow(1 - i / length, decay);
+    }
+  }
+  return buffer;
+}
+
+function playAudio() {
+  if (!audioBuffer || !audioCtx) return;
+  stopAudio();
+
+  sourceNode = audioCtx.createBufferSource();
+  sourceNode.buffer = audioBuffer;
+  sourceNode.loop = true;
+  sourceNode.connect(filterNode);
+
+  // Apply current tempo — playbackRate 0.9 = 10% slower, 1.1 = 10% faster
+  const tempo = parseInt(document.getElementById('tempo-slider').value);
+  sourceNode.playbackRate.value = tempo / 100;
+
+  sourceNode.start(0, pauseOffset);
+  startTime = audioCtx.currentTime - pauseOffset;
+  isPlaying = true;
+
+  document.getElementById('play-btn').textContent = '⏸';
+  document.getElementById('play-btn').classList.add('playing');
+  setStatus('Playing');
+}
+
+function stopAudio() {
+  if (sourceNode) {
+    try {
+      pauseOffset = audioCtx.currentTime - startTime;
+      sourceNode.stop();
+    } catch(e) {}
+    sourceNode = null;
+  }
+  isPlaying = false;
+  document.getElementById('play-btn').textContent = '▶';
+  document.getElementById('play-btn').classList.remove('playing');
+}
+
+// ─────────────────────────────────────────────
+// APPLY EFFECTS
+// ─────────────────────────────────────────────
+function applyEffects(filterHz, reverbAmount, tempoPct) {
+  if (!audioCtx) return;
+
+  // Smooth transitions using AudioParam's time-based ramp.
+  // Instead of a jarring instant jump, the value glides over 0.5 seconds.
+  const t = audioCtx.currentTime;
+  filterNode.frequency.setTargetAtTime(filterHz, t, 0.5);
+  wetGain.gain.setTargetAtTime(reverbAmount, t, 0.5);
+  dryGain.gain.setTargetAtTime(1.0 - reverbAmount * 0.5, t, 0.5);
+
+  if (sourceNode) {
+    sourceNode.playbackRate.setTargetAtTime((100 + tempoPct) / 100, t, 0.5);
+  }
+
+  // Update slider displays
+  document.getElementById('filter-slider').value = filterHz;
+  document.getElementById('reverb-slider').value = Math.round(reverbAmount * 100);
+  document.getElementById('tempo-slider').value  = 100 + tempoPct;
+  updateSliderLabels(filterHz, reverbAmount, tempoPct);
+}
+
+function updateSliderLabels(filterHz, reverb, tempoPct) {
+  document.getElementById('filter-val').textContent =
+    filterHz >= 1000 ? (filterHz/1000).toFixed(1) + ' kHz' : Math.round(filterHz) + ' Hz';
+  document.getElementById('reverb-val').textContent = Math.round(reverb * 100) + '%';
+  const sign = tempoPct >= 0 ? '+' : '';
+  document.getElementById('tempo-val').textContent  = sign + tempoPct.toFixed(1) + '%';
+}
+
+function updateBandDisplay(score) {
+  const fx = getEffects(score);
+  const display = document.getElementById('band-display');
+  const nameEl  = document.getElementById('band-name');
+  const scoreEl = document.getElementById('score-display');
+
+  // Remove all band classes, add current one
+  BANDS.forEach(b => display.classList.remove(b.cls));
+  display.classList.add(fx.band.cls);
+  nameEl.textContent  = fx.band.name;
+  nameEl.style.color  = '';  // let CSS handle it
+  scoreEl.textContent = `Heat score: ${Math.round(score)}`;
+
+  return fx;
+}
+
+// ─────────────────────────────────────────────
+// EVENT HANDLERS
+// ─────────────────────────────────────────────
+
+// Heat score slider — drives everything automatically
+document.getElementById('heat-slider').addEventListener('input', function() {
+  const score = parseInt(this.value);
+  const fx = updateBandDisplay(score);
+  applyEffects(fx.filterHz, fx.reverb, fx.tempoPct);
+});
+
+// Manual override sliders
+document.getElementById('filter-slider').addEventListener('input', function() {
+  const hz = parseInt(this.value);
+  if (filterNode) filterNode.frequency.setTargetAtTime(hz, audioCtx.currentTime, 0.3);
+  document.getElementById('filter-val').textContent =
+    hz >= 1000 ? (hz/1000).toFixed(1) + ' kHz' : hz + ' Hz';
+});
+
+document.getElementById('reverb-slider').addEventListener('input', function() {
+  const val = parseInt(this.value) / 100;
+  if (wetGain) {
+    wetGain.gain.setTargetAtTime(val, audioCtx.currentTime, 0.3);
+    dryGain.gain.setTargetAtTime(1.0 - val * 0.5, audioCtx.currentTime, 0.3);
+  }
+  document.getElementById('reverb-val').textContent = this.value + '%';
+});
+
+document.getElementById('tempo-slider').addEventListener('input', function() {
+  const rate = parseInt(this.value) / 100;
+  if (sourceNode) sourceNode.playbackRate.setTargetAtTime(rate, audioCtx.currentTime, 0.3);
+  const pct = parseInt(this.value) - 100;
+  const sign = pct >= 0 ? '+' : '';
+  document.getElementById('tempo-val').textContent = sign + pct + '%';
+});
+
+// File loader
+document.getElementById('file-input').addEventListener('change', async function() {
+  const file = this.files[0];
+  if (!file) return;
+
+  document.getElementById('file-label').textContent = '⏳ ' + file.name;
+  setStatus('Loading...');
+
+  if (!audioCtx) buildAudioGraph();
+  if (audioCtx.state === 'suspended') audioCtx.resume();
+
+  stopAudio();
+  pauseOffset = 0;
+
+  const arrayBuffer = await file.arrayBuffer();
+  audioBuffer = await audioCtx.decodeAudioData(arrayBuffer);
+
+  document.getElementById('file-label').textContent = '🎵 ' + file.name;
+  document.getElementById('play-btn').disabled = false;
+  setStatus('Ready — press play');
+});
+
+// Play / pause
+document.getElementById('play-btn').addEventListener('click', function() {
+  if (!audioCtx) buildAudioGraph();
+  if (audioCtx.state === 'suspended') audioCtx.resume();
+
+  if (isPlaying) {
+    stopAudio();
+    setStatus('Paused');
+  } else {
+    playAudio();
+  }
+});
+
+function setStatus(msg) {
+  document.getElementById('status').textContent = msg;
+}
+
+// Initial display
+updateBandDisplay(0);
+</script>
 </body>
 </html>
