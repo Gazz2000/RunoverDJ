@@ -7,11 +7,34 @@
 <meta name="apple-mobile-web-app-capable" content="yes">
 <title>RunoverDJ</title>
 <style>
+  /*
+   * THEME SYSTEM
+   * Instead of hardcoding colours everywhere, we define CSS custom properties
+   * (variables) on the body. JavaScript swaps these per band and everything
+   * that uses them updates automatically — including the transition animation.
+   *
+   * --bg       : page background
+   * --surface  : panel / card background
+   * --accent   : highlight colour (band name, slider thumb)
+   * --text      : primary text
+   * --subtle   : muted text / labels
+   * --border   : panel borders
+   */
+
+  :root {
+    --bg:      #080d12;
+    --surface: #0f1e2e;
+    --accent:  #4fc3f7;
+    --text:    #ddf0ff;
+    --subtle:  #4a7a9b;
+    --border:  #1a3a5c;
+  }
+
   * { box-sizing: border-box; margin: 0; padding: 0; }
 
   body {
-    background: #0d0d0d;
-    color: #f0f0f0;
+    background: var(--bg);
+    color: var(--text);
     font-family: 'Segoe UI', system-ui, sans-serif;
     min-height: 100vh;
     display: flex;
@@ -19,14 +42,17 @@
     align-items: center;
     padding: 20px;
     gap: 16px;
+    /* Smooth the whole-page colour transition between bands */
+    transition: background 1.2s ease, color 1.2s ease;
   }
 
   h1 {
     font-size: 1.4rem;
     font-weight: 300;
     letter-spacing: 0.2em;
-    color: #888;
+    color: var(--subtle);
     text-transform: uppercase;
+    transition: color 1.2s ease;
   }
 
   /* Band display */
@@ -34,28 +60,25 @@
     text-align: center;
     padding: 16px 32px;
     border-radius: 12px;
-    background: #1a1a1a;
+    background: var(--surface);
+    border: 1px solid var(--border);
     width: 100%;
     max-width: 400px;
-    transition: background 0.8s;
+    transition: background 1.2s ease, border-color 1.2s ease;
   }
   #band-name {
     font-size: 2rem;
     font-weight: 700;
     letter-spacing: 0.05em;
+    color: var(--accent);
+    transition: color 1.2s ease;
   }
   #score-display {
     font-size: 0.9rem;
-    color: #888;
+    color: var(--subtle);
     margin-top: 4px;
+    transition: color 1.2s ease;
   }
-
-  /* Band colours */
-  .band-chill      { background: #0d1f2d !important; color: #4fc3f7; }
-  .band-warmup     { background: #1a2a1a !important; color: #81c784; }
-  .band-steady     { background: #2a2a0d !important; color: #fff176; }
-  .band-push       { background: #2a1a0d !important; color: #ffb74d; }
-  .band-beastmode  { background: #2a0d0d !important; color: #ef5350; }
 
   /* Load + play controls */
   .controls {
@@ -68,51 +91,53 @@
 
   label.file-btn {
     flex: 1;
-    background: #1e1e1e;
-    border: 1px solid #333;
+    background: var(--surface);
+    border: 1px solid var(--border);
     border-radius: 8px;
     padding: 12px;
     text-align: center;
     cursor: pointer;
     font-size: 0.85rem;
-    color: #aaa;
+    color: var(--subtle);
     white-space: nowrap;
     overflow: hidden;
     text-overflow: ellipsis;
+    transition: background 1.2s ease, border-color 1.2s ease, color 1.2s ease;
   }
-  label.file-btn:hover { border-color: #555; }
   #file-input { display: none; }
 
   button {
     width: 56px;
     height: 56px;
     border-radius: 50%;
-    border: none;
-    background: #333;
-    color: #fff;
+    border: 2px solid var(--border);
+    background: var(--surface);
+    color: var(--accent);
     font-size: 1.4rem;
     cursor: pointer;
     flex-shrink: 0;
-    transition: background 0.2s;
+    transition: background 0.2s, border-color 1.2s ease, color 1.2s ease;
   }
-  button:hover { background: #444; }
   button:disabled { opacity: 0.3; cursor: default; }
-  button.playing { background: #c0392b; }
+  button.playing { background: var(--accent); color: var(--bg); }
 
-  /* Sliders */
+  /* Panels */
   .panel {
-    background: #1a1a1a;
+    background: var(--surface);
+    border: 1px solid var(--border);
     border-radius: 12px;
     padding: 16px;
     width: 100%;
     max-width: 400px;
+    transition: background 1.2s ease, border-color 1.2s ease;
   }
   .panel h2 {
     font-size: 0.75rem;
     text-transform: uppercase;
     letter-spacing: 0.15em;
-    color: #555;
+    color: var(--subtle);
     margin-bottom: 14px;
+    transition: color 1.2s ease;
   }
 
   .slider-row {
@@ -125,32 +150,36 @@
   .slider-label {
     width: 60px;
     font-size: 0.8rem;
-    color: #888;
+    color: var(--subtle);
     flex-shrink: 0;
+    transition: color 1.2s ease;
   }
   input[type=range] {
     flex: 1;
     height: 6px;
     -webkit-appearance: none;
     appearance: none;
-    background: #333;
+    background: var(--border);
     border-radius: 3px;
     outline: none;
+    transition: background 1.2s ease;
   }
   input[type=range]::-webkit-slider-thumb {
     -webkit-appearance: none;
     width: 22px;
     height: 22px;
     border-radius: 50%;
-    background: #e74c3c;
+    background: var(--accent);
     cursor: pointer;
+    transition: background 1.2s ease;
   }
   .slider-value {
     width: 54px;
     font-size: 0.8rem;
-    color: #aaa;
+    color: var(--subtle);
     text-align: right;
     flex-shrink: 0;
+    transition: color 1.2s ease;
   }
 
   .heat-score-row {
@@ -242,11 +271,26 @@
 // HEAT SCORE BANDS (ported from heat_score.py)
 // ─────────────────────────────────────────────
 const BANDS = [
-  { name: "Chill",      cls: "band-chill",     min: 0,    max: 500,  filterHz: 200,   reverb: 0.9, tempoPct: -10 },
-  { name: "Warmup",     cls: "band-warmup",    min: 500,  max: 1000, filterHz: 800,   reverb: 0.6, tempoPct: -5  },
-  { name: "Steady",     cls: "band-steady",    min: 1000, max: 1500, filterHz: 2000,  reverb: 0.3, tempoPct: 0   },
-  { name: "Push",       cls: "band-push",      min: 1500, max: 2000, filterHz: 5000,  reverb: 0.1, tempoPct: 5   },
-  { name: "Beast Mode", cls: "band-beastmode", min: 2000, max: 9999, filterHz: 20000, reverb: 0.0, tempoPct: 7   },
+  {
+    name: "Chill",  min: 0,    max: 500,  filterHz: 200,   reverb: 0.9, tempoPct: -10,
+    theme: { bg: "#080d12", surface: "#0f1e2e", accent: "#4fc3f7", text: "#ddf0ff", subtle: "#4a7a9b", border: "#1a3a5c" }
+  },
+  {
+    name: "Warmup", min: 500,  max: 1000, filterHz: 800,   reverb: 0.6, tempoPct: -5,
+    theme: { bg: "#080e08", surface: "#0f200f", accent: "#69d46e", text: "#ddffde", subtle: "#4a8a4a", border: "#1a4a1a" }
+  },
+  {
+    name: "Steady", min: 1000, max: 1500, filterHz: 2000,  reverb: 0.3, tempoPct: 0,
+    theme: { bg: "#0e0e04", surface: "#1e1e08", accent: "#e6e040", text: "#ffffe0", subtle: "#8a8a30", border: "#3a3a10" }
+  },
+  {
+    name: "Push",   min: 1500, max: 2000, filterHz: 5000,  reverb: 0.1, tempoPct: 5,
+    theme: { bg: "#110900", surface: "#221400", accent: "#ff9933", text: "#fff0d0", subtle: "#8a5a20", border: "#442200" }
+  },
+  {
+    name: "Beast Mode", min: 2000, max: 9999, filterHz: 20000, reverb: 0.0, tempoPct: 7,
+    theme: { bg: "#110000", surface: "#220404", accent: "#ff3333", text: "#ffe0e0", subtle: "#8a3030", border: "#440000" }
+  },
 ];
 
 function lerp(a, b, t) { return a + (b - a) * t; }
@@ -390,16 +434,22 @@ function updateSliderLabels(filterHz, reverb, tempoPct) {
 
 function updateBandDisplay(score) {
   const fx = getEffects(score);
-  const display = document.getElementById('band-display');
   const nameEl  = document.getElementById('band-name');
   const scoreEl = document.getElementById('score-display');
 
-  // Remove all band classes, add current one
-  BANDS.forEach(b => display.classList.remove(b.cls));
-  display.classList.add(fx.band.cls);
   nameEl.textContent  = fx.band.name;
-  nameEl.style.color  = '';  // let CSS handle it
   scoreEl.textContent = `Heat score: ${Math.round(score)}`;
+
+  // Swap CSS custom properties on the root — everything themed inherits this.
+  // The CSS transition on each element smooths the colour change over 1.2s.
+  const t = fx.band.theme;
+  const root = document.documentElement;
+  root.style.setProperty('--bg',      t.bg);
+  root.style.setProperty('--surface', t.surface);
+  root.style.setProperty('--accent',  t.accent);
+  root.style.setProperty('--text',    t.text);
+  root.style.setProperty('--subtle',  t.subtle);
+  root.style.setProperty('--border',  t.border);
 
   return fx;
 }
