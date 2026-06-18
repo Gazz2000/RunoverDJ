@@ -230,7 +230,7 @@
 
   <div class="slider-row">
     <span class="slider-label">Tempo</span>
-    <input type="range" id="tempo-slider" min="80" max="120" value="90">
+    <input type="range" id="tempo-slider" min="80" max="107" value="90">
     <span class="slider-value" id="tempo-val">−10%</span>
   </div>
 </div>
@@ -242,11 +242,11 @@
 // HEAT SCORE BANDS (ported from heat_score.py)
 // ─────────────────────────────────────────────
 const BANDS = [
-  { name: "Chill",      cls: "band-chill",     min: 0,    max: 600,  filterHz: 200,   reverb: 0.9, tempoPct: -10 },
-  { name: "Warmup",     cls: "band-warmup",    min: 600,  max: 1200, filterHz: 800,   reverb: 0.6, tempoPct: -5  },
-  { name: "Steady",     cls: "band-steady",    min: 1200, max: 1800, filterHz: 2000,  reverb: 0.3, tempoPct: 0   },
-  { name: "Push",       cls: "band-push",      min: 1800, max: 2400, filterHz: 5000,  reverb: 0.1, tempoPct: 5   },
-  { name: "Beast Mode", cls: "band-beastmode", min: 2400, max: 9999, filterHz: 20000, reverb: 0.0, tempoPct: 10  },
+  { name: "Chill",      cls: "band-chill",     min: 0,    max: 500,  filterHz: 200,   reverb: 0.9, tempoPct: -10 },
+  { name: "Warmup",     cls: "band-warmup",    min: 500,  max: 1000, filterHz: 800,   reverb: 0.6, tempoPct: -5  },
+  { name: "Steady",     cls: "band-steady",    min: 1000, max: 1500, filterHz: 2000,  reverb: 0.3, tempoPct: 0   },
+  { name: "Push",       cls: "band-push",      min: 1500, max: 2000, filterHz: 5000,  reverb: 0.1, tempoPct: 5   },
+  { name: "Beast Mode", cls: "band-beastmode", min: 2000, max: 9999, filterHz: 20000, reverb: 0.0, tempoPct: 7   },
 ];
 
 function lerp(a, b, t) { return a + (b - a) * t; }
