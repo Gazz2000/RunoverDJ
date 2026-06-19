@@ -205,6 +205,76 @@
     box-shadow: 0 2px 6px rgba(0,0,0,0.5);
   }
 
+  /* Heat score pane */
+  .heat-pane {
+    width: 100%;
+    max-width: 400px;
+    text-align: center;
+    padding: 24px 16px 20px;
+    border-radius: 12px;
+    background: var(--surface);
+    border: 1px solid var(--border);
+    transition: background 1.2s ease, border-color 1.2s ease;
+  }
+  #heat-number {
+    font-size: 5rem;
+    font-weight: 800;
+    line-height: 1;
+    color: var(--accent);
+    letter-spacing: -2px;
+    transition: color 1.2s ease;
+  }
+  #heat-zone {
+    font-size: 1.3rem;
+    font-weight: 600;
+    color: var(--text);
+    margin-top: 6px;
+    letter-spacing: 0.08em;
+    transition: color 1.2s ease;
+  }
+  #heat-source {
+    font-size: 0.7rem;
+    color: var(--subtle);
+    margin-top: 4px;
+    text-transform: uppercase;
+    letter-spacing: 0.1em;
+    transition: color 1.2s ease;
+  }
+
+  /* HR pane */
+  .hr-row {
+    display: flex;
+    align-items: center;
+    gap: 16px;
+  }
+  #hr-number {
+    font-size: 3rem;
+    font-weight: 800;
+    color: var(--accent);
+    line-height: 1;
+    min-width: 90px;
+    transition: color 1.2s ease;
+  }
+  #hr-bpm-label {
+    font-size: 0.8rem;
+    color: var(--subtle);
+    transition: color 1.2s ease;
+  }
+  #hr-updated {
+    font-size: 0.75rem;
+    color: var(--subtle);
+    margin-bottom: 8px;
+    transition: color 1.2s ease;
+  }
+  .connect-btn {
+    width: auto !important;
+    height: auto !important;
+    border-radius: 8px !important;
+    padding: 8px 14px !important;
+    font-size: 0.8rem !important;
+    border: 1px solid var(--border) !important;
+  }
+
   #status {
     font-size: 0.75rem;
     color: #555;
@@ -216,10 +286,26 @@
 
 <h1>RunoverDJ</h1>
 
-<!-- Band / score display -->
-<div id="band-display" class="band-chill">
-  <div id="band-name">Load a track</div>
-  <div id="score-display">Heat score: 0</div>
+<!-- Heat score pane -->
+<div class="heat-pane">
+  <div id="heat-number">0</div>
+  <div id="heat-zone">Chill</div>
+  <div id="heat-source">manual mode</div>
+</div>
+
+<!-- HR pane -->
+<div class="panel">
+  <h2>Heart Rate</h2>
+  <div class="hr-row">
+    <div>
+      <div id="hr-number">—</div>
+      <div id="hr-bpm-label">bpm</div>
+    </div>
+    <div>
+      <div id="hr-updated">Not connected</div>
+      <button id="hr-connect-btn" class="connect-btn">🫀 Connect Fitbit</button>
+    </div>
+  </div>
 </div>
 
 <!-- File loader + play button -->
@@ -229,6 +315,20 @@
   </label>
   <input type="file" id="file-input" accept="audio/*">
   <button id="play-btn" disabled>▶</button>
+</div>
+
+<!-- GPS panel -->
+<div class="panel">
+  <h2>GPS Speed</h2>
+  <div style="display:flex; align-items:center; gap:12px;">
+    <button id="gps-btn" style="width:auto;height:auto;border-radius:8px;padding:10px 16px;font-size:0.85rem;">
+      📍 Start GPS
+    </button>
+    <div style="flex:1;">
+      <div id="gps-speed" style="font-size:1.8rem;font-weight:700;color:var(--accent);transition:color 1.2s;">— km/h</div>
+      <div id="gps-status" style="font-size:0.75rem;color:var(--subtle);transition:color 1.2s;">GPS not started</div>
+    </div>
+  </div>
 </div>
 
 <!-- Heat score slider -->
@@ -432,36 +532,18 @@ function updateSliderLabels(filterHz, reverb, tempoPct) {
   document.getElementById('tempo-val').textContent  = sign + tempoPct.toFixed(1) + '%';
 }
 
-function updateBandDisplay(score) {
-  const fx = getEffects(score);
-  const nameEl  = document.getElementById('band-name');
-  const scoreEl = document.getElementById('score-display');
-
-  nameEl.textContent  = fx.band.name;
-  scoreEl.textContent = `Heat score: ${Math.round(score)}`;
-
-  // Swap CSS custom properties on the root — everything themed inherits this.
-  // The CSS transition on each element smooths the colour change over 1.2s.
-  const t = fx.band.theme;
-  const root = document.documentElement;
-  root.style.setProperty('--bg',      t.bg);
-  root.style.setProperty('--surface', t.surface);
-  root.style.setProperty('--accent',  t.accent);
-  root.style.setProperty('--text',    t.text);
-  root.style.setProperty('--subtle',  t.subtle);
-  root.style.setProperty('--border',  t.border);
-
-  return fx;
-}
+// updateBandDisplay and updateTheme defined later in the file
 
 // ─────────────────────────────────────────────
 // EVENT HANDLERS
 // ─────────────────────────────────────────────
 
-// Heat score slider — drives everything automatically
+// Heat score slider — manual testing mode
 document.getElementById('heat-slider').addEventListener('input', function() {
+  autoMode = false;
   const score = parseInt(this.value);
   const fx = updateBandDisplay(score);
+  document.getElementById('heat-source').textContent = 'manual mode';
   applyEffects(fx.filterHz, fx.reverb, fx.tempoPct);
 });
 
@@ -529,8 +611,473 @@ function setStatus(msg) {
   document.getElementById('status').textContent = msg;
 }
 
+// ─────────────────────────────────────────────
+// KALMAN FILTER FOR GPS SPEED
+// ─────────────────────────────────────────────
+//
+// Theory: a Kalman filter tracks an estimate and its uncertainty together.
+// Each cycle has two steps:
+//
+//   PREDICT: assume the value drifts slightly (process noise Q).
+//            uncertainty grows a little — we're less sure where we are.
+//
+//   UPDATE:  a new measurement arrives with its own uncertainty (R).
+//            Kalman Gain K = how much to trust the new reading vs our estimate.
+//            K near 1 = trust the new reading. K near 0 = trust our estimate.
+//            We blend them: estimate = estimate + K * (measurement - estimate)
+//            Then shrink uncertainty: P = (1 - K) * P
+//
+// For GPS speed, measurement noise R comes directly from the phone's reported
+// accuracy — a less accurate fix gets a higher R, so K is smaller, so we
+// trust our running estimate more. Jumpy readings barely move the output.
+
+class KalmanFilter {
+  constructor(processNoise = 0.1, measureNoise = 1.0) {
+    this.Q = processNoise;   // how much the true speed can change between readings
+    this.R = measureNoise;   // default measurement uncertainty
+    this.P = 1.0;            // current estimate uncertainty
+    this.x = 0;              // current speed estimate (km/h)
+    this.initialised = false;
+  }
+
+  update(measuredSpeed, accuracyMetres) {
+    // Scale measurement noise by GPS accuracy.
+    // A 20m accuracy reading is 4x less trustworthy than a 5m reading.
+    const R = this.R * (accuracyMetres / 5.0);
+
+    if (!this.initialised) {
+      // Seed the filter with the first real reading rather than 0
+      this.x = measuredSpeed;
+      this.initialised = true;
+      return this.x;
+    }
+
+    // Predict step: uncertainty grows (we don't know if they sped up/slowed down)
+    this.P = this.P + this.Q;
+
+    // Update step: blend measurement with prediction
+    const K = this.P / (this.P + R);        // Kalman gain
+    this.x = this.x + K * (measuredSpeed - this.x);
+    this.P = (1 - K) * this.P;
+
+    return this.x;
+  }
+
+  reset() {
+    this.P = 1.0;
+    this.x = 0;
+    this.initialised = false;
+  }
+}
+
+// ─────────────────────────────────────────────
+// GPS
+// ─────────────────────────────────────────────
+const kalman = new KalmanFilter(0.5, 2.0);
+let gpsWatchId = null;
+let lastPos = null;   // fallback for devices that don't report speed natively
+
+// Current smoothed speed in km/h — other modules read this
+let currentSpeedKmh = 0;
+
+function startGPS() {
+  if (!navigator.geolocation) {
+    document.getElementById('gps-status').textContent = 'GPS not supported in this browser';
+    return;
+  }
+
+  document.getElementById('gps-status').textContent = 'Acquiring signal...';
+  document.getElementById('gps-btn').textContent = '⏹ Stop GPS';
+
+  gpsWatchId = navigator.geolocation.watchPosition(
+    onPosition,
+    onGPSError,
+    {
+      enableHighAccuracy: true,   // use GPS chip, not cell/wifi
+      maximumAge: 2000,           // accept cached positions up to 2s old
+      timeout: 10000              // fail if no fix within 10s
+    }
+  );
+}
+
+function stopGPS() {
+  if (gpsWatchId !== null) {
+    navigator.geolocation.clearWatch(gpsWatchId);
+    gpsWatchId = null;
+  }
+  kalman.reset();
+  lastPos = null;
+  currentSpeedKmh = 0;
+  document.getElementById('gps-speed').textContent = '— km/h';
+  document.getElementById('gps-status').textContent = 'GPS stopped';
+  document.getElementById('gps-btn').textContent = '📍 Start GPS';
+}
+
+function onPosition(pos) {
+  const accuracy = pos.coords.accuracy;   // metres
+
+  // Prefer the native speed if the device provides it (most Android phones do)
+  // It's in m/s — convert to km/h
+  let rawSpeed;
+  if (pos.coords.speed !== null && pos.coords.speed >= 0) {
+    rawSpeed = pos.coords.speed * 3.6;
+  } else {
+    rawSpeed = calcSpeedFromPositions(pos);
+  }
+
+  // Clamp negatives (can happen briefly on a cold fix)
+  rawSpeed = Math.max(0, rawSpeed);
+
+  // Run through Kalman filter
+  currentSpeedKmh = kalman.update(rawSpeed, accuracy);
+  currentSpeedKmh = Math.max(0, currentSpeedKmh);
+
+  lastPos = pos;
+  checkAutoMode();
+
+  // Update display
+  document.getElementById('gps-speed').textContent = currentSpeedKmh.toFixed(1) + ' km/h';
+  const accText = accuracy < 10 ? '✅ ' + Math.round(accuracy) + 'm accuracy'
+                : accuracy < 25 ? '⚠️ ' + Math.round(accuracy) + 'm accuracy'
+                :                  '❌ Poor signal (' + Math.round(accuracy) + 'm)';
+  document.getElementById('gps-status').textContent = accText;
+}
+
+function calcSpeedFromPositions(pos) {
+  // Fallback: calculate speed from the distance between two position fixes.
+  // Uses the Haversine formula — same maths as "as the crow flies" distance
+  // between two lat/long points on a sphere.
+  if (!lastPos) return 0;
+
+  const dt = (pos.timestamp - lastPos.timestamp) / 1000; // seconds
+  if (dt <= 0 || dt > 10) return 0;
+
+  const R   = 6371000; // Earth radius in metres
+  const φ1  = lastPos.coords.latitude  * Math.PI / 180;
+  const φ2  = pos.coords.latitude      * Math.PI / 180;
+  const Δφ  = (pos.coords.latitude  - lastPos.coords.latitude)  * Math.PI / 180;
+  const Δλ  = (pos.coords.longitude - lastPos.coords.longitude) * Math.PI / 180;
+
+  const a = Math.sin(Δφ/2) * Math.sin(Δφ/2)
+          + Math.cos(φ1) * Math.cos(φ2) * Math.sin(Δλ/2) * Math.sin(Δλ/2);
+  const distMetres = R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+
+  return (distMetres / dt) * 3.6; // m/s → km/h
+}
+
+function onGPSError(err) {
+  const msgs = {
+    1: 'Location permission denied — allow it in browser settings',
+    2: 'GPS signal unavailable',
+    3: 'GPS timed out — try again outdoors',
+  };
+  document.getElementById('gps-status').textContent = msgs[err.code] || 'GPS error';
+}
+
+document.getElementById('gps-btn').addEventListener('click', function() {
+  if (gpsWatchId !== null) {
+    stopGPS();
+  } else {
+    startGPS();
+  }
+});
+
+// ─────────────────────────────────────────────
+// HEAT SCORE — AUTO CALCULATION
+// ─────────────────────────────────────────────
+// Ported directly from heat_score.py.
+// Runs every 5 seconds; wires GPS speed + HR into the score.
+
+const SMOOTHING_FACTOR = 0.8;
+const SPEED_FLOOR_FRACTION = 0.7;
+
+let smoothedScore  = 0;
+let lastNonZeroSpd = 0;
+let currentHR      = 0;
+let autoMode       = false;   // true once both GPS and HR are live
+
+function tickHeatScore() {
+  if (!autoMode) return;
+
+  const effectiveSpeed = currentSpeedKmh > 0.5
+    ? currentSpeedKmh
+    : lastNonZeroSpd * SPEED_FLOOR_FRACTION;
+
+  if (currentSpeedKmh > 0.5) lastNonZeroSpd = currentSpeedKmh;
+
+  const raw = effectiveSpeed * currentHR;
+  smoothedScore = smoothedScore === 0
+    ? raw
+    : SMOOTHING_FACTOR * smoothedScore + (1 - SMOOTHING_FACTOR) * raw;
+
+  const fx = getEffects(smoothedScore);
+  document.getElementById('heat-number').textContent = Math.round(smoothedScore);
+  document.getElementById('heat-zone').textContent   = fx.band.name;
+  document.getElementById('heat-source').textContent = 'live: ' +
+    currentSpeedKmh.toFixed(1) + ' km/h × ' + currentHR + ' bpm';
+
+  // Swap theme + apply audio effects
+  updateTheme(fx.band.theme);
+  applyEffects(fx.filterHz, fx.reverb, fx.tempoPct);
+}
+
+setInterval(tickHeatScore, 5000);
+
+// Called by GPS and HR code when data arrives to switch into auto mode
+function checkAutoMode() {
+  if (currentHR > 0 && currentSpeedKmh >= 0) autoMode = true;
+}
+
+// Override updateBandDisplay to also update the new heat pane
+function updateBandDisplay(score) {
+  const fx = getEffects(score);
+  document.getElementById('heat-number').textContent = Math.round(score);
+  document.getElementById('heat-zone').textContent   = fx.band.name;
+  updateTheme(fx.band.theme);
+  return fx;
+}
+
+function updateTheme(t) {
+  const root = document.documentElement;
+  root.style.setProperty('--bg',      t.bg);
+  root.style.setProperty('--surface', t.surface);
+  root.style.setProperty('--accent',  t.accent);
+  root.style.setProperty('--text',    t.text);
+  root.style.setProperty('--subtle',  t.subtle);
+  root.style.setProperty('--border',  t.border);
+}
+
+// ─────────────────────────────────────────────
+// GOOGLE OAUTH — PKCE FLOW
+// ─────────────────────────────────────────────
+// PKCE (Proof Key for Code Exchange) lets a frontend app do OAuth without
+// embedding a client secret. Instead:
+//   1. We generate a random 'code_verifier'
+//   2. Hash it → 'code_challenge', sent with the auth request
+//   3. When we exchange the code for a token, we send the original verifier
+//   4. Google checks the hash matches — proves we made the original request
+
+const OAUTH = {
+  clientId:    '807162253610-cij4bd0ch2v5a37a9jeqdevuc3qch0du.apps.googleusercontent.com',
+  redirectUri: 'https://gazz2000.github.io/RunoverDJ/',
+  scope:       'https://www.googleapis.com/auth/googlehealth.health_metrics_and_measurements.readonly',
+  authUrl:     'https://accounts.google.com/o/oauth2/v2/auth',
+  tokenUrl:    'https://oauth2.googleapis.com/token',
+};
+
+function generateVerifier() {
+  const arr = new Uint8Array(32);
+  crypto.getRandomValues(arr);
+  return btoa(String.fromCharCode(...arr)).replace(/\+/g,'-').replace(/\//g,'_').replace(/=/g,'');
+}
+
+async function generateChallenge(verifier) {
+  const data = new TextEncoder().encode(verifier);
+  const hash = await crypto.subtle.digest('SHA-256', data);
+  return btoa(String.fromCharCode(...new Uint8Array(hash)))
+    .replace(/\+/g,'-').replace(/\//g,'_').replace(/=/g,'');
+}
+
+async function startFitbitAuth() {
+  const verifier   = generateVerifier();
+  const challenge  = await generateChallenge(verifier);
+  sessionStorage.setItem('pkce_verifier', verifier);
+
+  const params = new URLSearchParams({
+    response_type:         'code',
+    client_id:             OAUTH.clientId,
+    redirect_uri:          OAUTH.redirectUri,
+    scope:                 OAUTH.scope,
+    code_challenge:        challenge,
+    code_challenge_method: 'S256',
+    access_type:           'offline',
+    prompt:                'consent',
+  });
+  window.location.href = `${OAUTH.authUrl}?${params}`;
+}
+
+async function exchangeCode(code) {
+  const verifier = sessionStorage.getItem('pkce_verifier');
+  const res = await fetch(OAUTH.tokenUrl, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+    body: new URLSearchParams({
+      grant_type:    'authorization_code',
+      code,
+      redirect_uri:  OAUTH.redirectUri,
+      client_id:     OAUTH.clientId,
+      code_verifier: verifier,
+    }),
+  });
+  return res.json();
+}
+
+async function refreshAccessToken() {
+  const refresh = localStorage.getItem('hr_refresh_token');
+  if (!refresh) return null;
+  const res = await fetch(OAUTH.tokenUrl, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+    body: new URLSearchParams({
+      grant_type:    'refresh_token',
+      refresh_token: refresh,
+      client_id:     OAUTH.clientId,
+    }),
+  });
+  const data = await res.json();
+  if (data.access_token) {
+    localStorage.setItem('hr_access_token', data.access_token);
+    localStorage.setItem('hr_token_expiry', Date.now() + data.expires_in * 1000);
+    return data.access_token;
+  }
+  return null;
+}
+
+async function getValidToken() {
+  const expiry = parseInt(localStorage.getItem('hr_token_expiry') || '0');
+  if (Date.now() < expiry - 60000) {
+    return localStorage.getItem('hr_access_token');
+  }
+  return await refreshAccessToken();
+}
+
+function isFitbitConnected() {
+  return !!localStorage.getItem('hr_refresh_token');
+}
+
+// ─────────────────────────────────────────────
+// HEART RATE POLLING
+// ─────────────────────────────────────────────
+
+function findNested(obj, key) {
+  if (typeof obj !== 'object' || obj === null) return null;
+  if (key in obj) return obj[key];
+  for (const v of Object.values(obj)) {
+    const r = findNested(v, key);
+    if (r !== null) return r;
+  }
+  return null;
+}
+
+function formatHRTimestamp(point) {
+  try {
+    const month = findNested(point, 'month');
+    const day   = findNested(point, 'day');
+    const time  = findNested(point, 'time');
+    if (time && month && day) {
+      const h = String(time.hours   || 0).padStart(2,'0');
+      const m = String(time.minutes || 0).padStart(2,'0');
+      return `${day}/${month} ${h}:${m}`;
+    }
+  } catch(e) {}
+  return 'unknown time';
+}
+
+async function pollHR() {
+  const token = await getValidToken();
+  if (!token) {
+    document.getElementById('hr-updated').textContent = 'Token expired — reconnect';
+    document.getElementById('hr-connect-btn').textContent = '🫀 Reconnect Fitbit';
+    return;
+  }
+
+  const now   = new Date();
+  const start = new Date(now - 30 * 60 * 1000);
+  const fmt   = d => d.toISOString().replace(/\.\d{3}Z$/, 'Z');
+  const filter = `heart_rate.sample_time.physical_time >= "${fmt(start)}" AND heart_rate.sample_time.physical_time < "${fmt(now)}"`;
+
+  try {
+    const res  = await fetch(
+      `https://health.googleapis.com/v4/users/me/dataTypes/heart-rate/dataPoints?` +
+      new URLSearchParams({ filter, pageSize: 10 }),
+      { headers: { Authorization: `Bearer ${token}` } }
+    );
+    const data = await res.json();
+    const pts  = data.dataPoints || [];
+
+    if (pts.length > 0) {
+      const bpm = findNested(pts[0], 'beatsPerMinute');
+      if (bpm) {
+        currentHR = parseInt(bpm);
+        document.getElementById('hr-number').textContent  = currentHR;
+        document.getElementById('hr-updated').textContent = 'Updated ' + formatHRTimestamp(pts[0]);
+        checkAutoMode();
+      }
+    } else {
+      document.getElementById('hr-updated').textContent = 'No data — open Fitbit app to sync';
+    }
+  } catch(e) {
+    document.getElementById('hr-updated').textContent = 'Poll failed — ' + e.message;
+  }
+}
+
+let hrPollInterval = null;
+
+function startHRPolling() {
+  document.getElementById('hr-connect-btn').textContent = '🔌 Disconnect';
+  document.getElementById('hr-updated').textContent = 'Polling...';
+  pollHR();
+  hrPollInterval = setInterval(pollHR, 30000);
+}
+
+document.getElementById('hr-connect-btn').addEventListener('click', function() {
+  if (isFitbitConnected() && hrPollInterval) {
+    clearInterval(hrPollInterval);
+    hrPollInterval = null;
+    currentHR = 0;
+    localStorage.removeItem('hr_access_token');
+    localStorage.removeItem('hr_refresh_token');
+    localStorage.removeItem('hr_token_expiry');
+    document.getElementById('hr-number').textContent  = '—';
+    document.getElementById('hr-updated').textContent = 'Disconnected';
+    this.textContent = '🫀 Connect Fitbit';
+    autoMode = false;
+  } else {
+    startFitbitAuth();
+  }
+});
+
+// ─────────────────────────────────────────────
+// HANDLE OAUTH REDIRECT ON PAGE LOAD
+// ─────────────────────────────────────────────
+// After Google redirects back, the URL contains ?code=...
+// We catch it here, exchange for tokens, clean up the URL.
+
+(async function handleOAuthRedirect() {
+  const params = new URLSearchParams(window.location.search);
+  const code   = params.get('code');
+  if (!code) {
+    // No redirect — check if we have a stored token and auto-start polling
+    if (isFitbitConnected()) startHRPolling();
+    return;
+  }
+
+  document.getElementById('hr-updated').textContent = 'Completing sign-in...';
+  // Clean the auth code from the URL so refresh doesn't re-trigger the flow
+  history.replaceState({}, '', window.location.pathname);
+
+  try {
+    const tokens = await exchangeCode(code);
+    if (tokens.access_token) {
+      localStorage.setItem('hr_access_token',  tokens.access_token);
+      localStorage.setItem('hr_token_expiry',  Date.now() + tokens.expires_in * 1000);
+      if (tokens.refresh_token) {
+        localStorage.setItem('hr_refresh_token', tokens.refresh_token);
+      }
+      sessionStorage.removeItem('pkce_verifier');
+      startHRPolling();
+    } else {
+      document.getElementById('hr-updated').textContent =
+        'Sign-in failed: ' + (tokens.error_description || tokens.error || 'unknown error');
+    }
+  } catch(e) {
+    document.getElementById('hr-updated').textContent = 'Sign-in error: ' + e.message;
+  }
+})();
+
 // Initial display
 updateBandDisplay(0);
+document.getElementById('heat-source').textContent = 'manual mode';
 </script>
 </body>
 </html>
