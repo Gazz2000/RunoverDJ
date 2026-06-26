@@ -275,6 +275,54 @@
     border: 1px solid var(--border) !important;
   }
 
+  /* Track list */
+  .track-list {
+    list-style: none;
+    margin-top: 10px;
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+    max-height: 200px;
+    overflow-y: auto;
+  }
+  .track-list li {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 8px 10px;
+    border-radius: 6px;
+    background: transparent;
+    border: 1px solid transparent;
+    font-size: 0.82rem;
+    color: var(--subtle);
+    cursor: pointer;
+    transition: background 0.2s, color 0.2s, border-color 0.2s;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+  .track-list li:hover { background: rgba(255,255,255,0.05); color: var(--text); }
+  .track-list li.current {
+    background: rgba(255,255,255,0.08);
+    border-color: var(--border);
+    color: var(--accent);
+    font-weight: 600;
+  }
+  .track-num {
+    flex-shrink: 0;
+    width: 18px;
+    text-align: right;
+    opacity: 0.4;
+    font-size: 0.75rem;
+  }
+  .track-list li.current .track-num { opacity: 0; }
+  .track-playing-icon {
+    flex-shrink: 0;
+    width: 18px;
+    display: none;
+  }
+  .track-list li.current .track-playing-icon { display: block; }
+
   #status {
     font-size: 0.75rem;
     color: #555;
@@ -308,13 +356,20 @@
   </div>
 </div>
 
-<!-- File loader + play button -->
+<!-- File loader + playback controls -->
 <div class="controls">
   <label class="file-btn" for="file-input" id="file-label">
-    📂 Choose MP3
+    📂 Add tracks
   </label>
-  <input type="file" id="file-input" accept="audio/*">
+  <input type="file" id="file-input" accept="audio/*" multiple>
   <button id="play-btn" disabled>▶</button>
+  <button id="skip-btn" disabled title="Next track">⏭</button>
+</div>
+
+<!-- Track list -->
+<div class="panel" id="playlist-panel" style="display:none">
+  <h2>Playlist — <span id="playlist-count">0 tracks</span></h2>
+  <ul class="track-list" id="track-list"></ul>
 </div>
 
 <!-- GPS panel -->
@@ -415,44 +470,47 @@ function getEffects(score) {
 // ─────────────────────────────────────────────
 // WEB AUDIO SETUP
 // ─────────────────────────────────────────────
-let audioCtx, sourceNode, filterNode, dryGain, wetGain, convolver;
-let audioBuffer = null;
-let isPlaying = false;
-let startTime = 0;
+let audioCtx, sourceNode, filterNode, dryGain, wetGain, convolver, masterGain;
+let isPlaying   = false;
+let startTime   = 0;
 let pauseOffset = 0;
+
+// Playlist state
+let playlist      = [];   // [{ buffer, name }] in shuffle order
+let currentIndex  = 0;
+let transitioning = false;
+
+const FADE_SECS = 2.5;    // crossfade duration
 
 function buildAudioGraph() {
   audioCtx = new (window.AudioContext || window.webkitAudioContext)();
 
-  // Low-pass filter — this is the main "energy" control
   filterNode = audioCtx.createBiquadFilter();
   filterNode.type = "lowpass";
   filterNode.frequency.value = 200;
   filterNode.Q.value = 0.8;
 
-  // Reverb via convolver with a synthetic impulse response.
-  // Theory: a real room's reverb is characterised by its impulse response —
-  // how the room responds to a single click. We fake this with decaying noise.
   convolver = audioCtx.createConvolver();
   convolver.buffer = makeImpulse(audioCtx, 2.5, 3.0);
 
-  // Wet/dry gains control how much reverb we blend in
   dryGain = audioCtx.createGain();
   wetGain = audioCtx.createGain();
   dryGain.gain.value = 1.0;
   wetGain.gain.value = 0.0;
 
-  // Graph: filter → dry path + wet (reverb) path → output
+  // masterGain sits at the end of the chain — used for fade in/out between tracks
+  masterGain = audioCtx.createGain();
+  masterGain.gain.value = 1.0;
+
   filterNode.connect(dryGain);
   filterNode.connect(convolver);
   convolver.connect(wetGain);
-  dryGain.connect(audioCtx.destination);
-  wetGain.connect(audioCtx.destination);
+  dryGain.connect(masterGain);
+  wetGain.connect(masterGain);
+  masterGain.connect(audioCtx.destination);
 }
 
 function makeImpulse(ctx, duration, decay) {
-  // Generate exponentially-decaying white noise as a reverb impulse response.
-  // Longer duration = bigger room feel. Higher decay = faster fadeout.
   const rate   = ctx.sampleRate;
   const length = Math.floor(rate * duration);
   const buffer = ctx.createBuffer(2, length, rate);
@@ -465,30 +523,69 @@ function makeImpulse(ctx, duration, decay) {
   return buffer;
 }
 
-function playAudio() {
-  if (!audioBuffer || !audioCtx) return;
-  stopAudio();
+function playTrack(index, offset = 0) {
+  if (!audioCtx || playlist.length === 0) return;
+
+  // Stop current source cleanly
+  if (sourceNode) {
+    sourceNode.onended = null;   // prevent it triggering auto-advance
+    try { sourceNode.stop(); } catch(e) {}
+    sourceNode = null;
+  }
+
+  currentIndex = ((index % playlist.length) + playlist.length) % playlist.length;
 
   sourceNode = audioCtx.createBufferSource();
-  sourceNode.buffer = audioBuffer;
-  sourceNode.loop = true;
+  sourceNode.buffer = playlist[currentIndex].buffer;
+  sourceNode.loop   = false;
   sourceNode.connect(filterNode);
 
-  // Apply current tempo — playbackRate 0.9 = 10% slower, 1.1 = 10% faster
   const tempo = parseInt(document.getElementById('tempo-slider').value);
   sourceNode.playbackRate.value = tempo / 100;
 
-  sourceNode.start(0, pauseOffset);
-  startTime = audioCtx.currentTime - pauseOffset;
-  isPlaying = true;
+  sourceNode.start(0, offset);
+  startTime   = audioCtx.currentTime - offset;
+  isPlaying   = true;
+  transitioning = false;
 
+  // When the track ends naturally, advance to next
+  sourceNode.onended = () => {
+    if (isPlaying && !transitioning) advanceTrack();
+  };
+
+  updateTrackListUI();
+  setStatus('▶ ' + playlist[currentIndex].name);
   document.getElementById('play-btn').textContent = '⏸';
   document.getElementById('play-btn').classList.add('playing');
-  setStatus('Playing');
+}
+
+function advanceTrack() {
+  if (playlist.length === 0 || transitioning) return;
+  transitioning = true;
+
+  const next = (currentIndex + 1) % playlist.length;
+
+  // Fade out, then start next track faded in
+  const t = audioCtx.currentTime;
+  masterGain.gain.setValueAtTime(masterGain.gain.value, t);
+  masterGain.gain.linearRampToValueAtTime(0, t + FADE_SECS);
+
+  setTimeout(() => {
+    masterGain.gain.setValueAtTime(0, audioCtx.currentTime);
+    masterGain.gain.linearRampToValueAtTime(1, audioCtx.currentTime + FADE_SECS);
+    playTrack(next, 0);
+  }, FADE_SECS * 1000);
+}
+
+function playAudio() {
+  if (playlist.length === 0 || !audioCtx) return;
+  masterGain.gain.setValueAtTime(1, audioCtx.currentTime);
+  playTrack(currentIndex, pauseOffset);
 }
 
 function stopAudio() {
   if (sourceNode) {
+    sourceNode.onended = null;
     try {
       pauseOffset = audioCtx.currentTime - startTime;
       sourceNode.stop();
@@ -498,6 +595,25 @@ function stopAudio() {
   isPlaying = false;
   document.getElementById('play-btn').textContent = '▶';
   document.getElementById('play-btn').classList.remove('playing');
+}
+
+// Fisher-Yates shuffle
+function shuffleArray(arr) {
+  for (let i = arr.length - 1; i > 0; i--) {
+    const j = Math.floor(Math.random() * (i + 1));
+    [arr[i], arr[j]] = [arr[j], arr[i]];
+  }
+  return arr;
+}
+
+function updateTrackListUI() {
+  const list = document.getElementById('track-list');
+  list.querySelectorAll('li').forEach((li, i) => {
+    li.classList.toggle('current', i === currentIndex);
+  });
+  // Scroll current track into view
+  const current = list.querySelector('.current');
+  if (current) current.scrollIntoView({ block: 'nearest' });
 }
 
 // ─────────────────────────────────────────────
@@ -572,26 +688,60 @@ document.getElementById('tempo-slider').addEventListener('input', function() {
   document.getElementById('tempo-val').textContent = sign + pct + '%';
 });
 
-// File loader
+// File loader — accepts multiple files, decodes all, shuffles, builds track list
 document.getElementById('file-input').addEventListener('change', async function() {
-  const file = this.files[0];
-  if (!file) return;
-
-  document.getElementById('file-label').textContent = '⏳ ' + file.name;
-  setStatus('Loading...');
+  const files = Array.from(this.files);
+  if (!files.length) return;
 
   if (!audioCtx) buildAudioGraph();
   if (audioCtx.state === 'suspended') audioCtx.resume();
 
   stopAudio();
   pauseOffset = 0;
+  document.getElementById('file-label').textContent = '⏳ Loading…';
+  setStatus(`Loading ${files.length} track${files.length > 1 ? 's' : ''}…`);
 
-  const arrayBuffer = await file.arrayBuffer();
-  audioBuffer = await audioCtx.decodeAudioData(arrayBuffer);
+  // Decode all files in parallel
+  const loaded = await Promise.all(files.map(async file => {
+    const ab  = await file.arrayBuffer();
+    const buf = await audioCtx.decodeAudioData(ab);
+    return { buffer: buf, name: file.name.replace(/\.[^.]+$/, '') };
+  }));
 
-  document.getElementById('file-label').textContent = '🎵 ' + file.name;
+  // Merge with existing playlist and shuffle the whole thing
+  playlist = shuffleArray([...playlist, ...loaded]);
+  currentIndex = 0;
+
+  // Rebuild track list UI
+  const listEl  = document.getElementById('track-list');
+  listEl.innerHTML = '';
+  playlist.forEach((track, i) => {
+    const li   = document.createElement('li');
+    li.dataset.index = i;
+    li.innerHTML = `
+      <span class="track-playing-icon">▶</span>
+      <span class="track-num">${i + 1}</span>
+      <span class="track-name">${track.name}</span>`;
+    li.addEventListener('click', () => {
+      pauseOffset = 0;
+      if (!isPlaying) {
+        masterGain.gain.setValueAtTime(1, audioCtx.currentTime);
+        isPlaying = true;
+        document.getElementById('play-btn').disabled = false;
+      }
+      playTrack(i, 0);
+    });
+    listEl.appendChild(li);
+  });
+
+  document.getElementById('playlist-panel').style.display = '';
+  document.getElementById('playlist-count').textContent =
+    playlist.length + ' track' + (playlist.length > 1 ? 's' : '');
+  document.getElementById('file-label').textContent = '📂 Add more';
   document.getElementById('play-btn').disabled = false;
+  document.getElementById('skip-btn').disabled = false;
   setStatus('Ready — press play');
+  updateTrackListUI();
 });
 
 // Play / pause
@@ -605,6 +755,13 @@ document.getElementById('play-btn').addEventListener('click', function() {
   } else {
     playAudio();
   }
+});
+
+// Skip to next track
+document.getElementById('skip-btn').addEventListener('click', function() {
+  if (playlist.length < 2) return;
+  pauseOffset = 0;
+  playTrack((currentIndex + 1) % playlist.length, 0);
 });
 
 function setStatus(msg) {
@@ -858,11 +1015,12 @@ function updateTheme(t) {
 //   4. Google checks the hash matches — proves we made the original request
 
 const OAUTH = {
-  clientId:    '807162253610-cij4bd0ch2v5a37a9jeqdevuc3qch0du.apps.googleusercontent.com',
-  redirectUri: 'https://gazz2000.github.io/RunoverDJ/',
-  scope:       'https://www.googleapis.com/auth/googlehealth.health_metrics_and_measurements.readonly',
-  authUrl:     'https://accounts.google.com/o/oauth2/v2/auth',
-  tokenUrl:    'https://oauth2.googleapis.com/token',
+  clientId:     '807162253610-cij4bd0ch2v5a37a9jeqdevuc3qch0du.apps.googleusercontent.com',
+  clientSecret: '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',
+  redirectUri:  'https://gazz2000.github.io/RunoverDJ/',
+  scope:        'https://www.googleapis.com/auth/googlehealth.health_metrics_and_measurements.readonly',
+  authUrl:      'https://accounts.google.com/o/oauth2/v2/auth',
+  tokenUrl:     'https://oauth2.googleapis.com/token',
 };
 
 function generateVerifier() {
@@ -906,6 +1064,7 @@ async function exchangeCode(code) {
       code,
       redirect_uri:  OAUTH.redirectUri,
       client_id:     OAUTH.clientId,
+      client_secret: OAUTH.clientSecret,
       code_verifier: verifier,
     }),
   });
@@ -922,6 +1081,7 @@ async function refreshAccessToken() {
       grant_type:    'refresh_token',
       refresh_token: refresh,
       client_id:     OAUTH.clientId,
+      client_secret: OAUTH.clientSecret,
     }),
   });
   const data = await res.json();
