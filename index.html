@@ -323,6 +323,13 @@
   }
   .track-list li.current .track-playing-icon { display: block; }
 
+  @keyframes sprint-pulse {
+    0%   { box-shadow: 0 0 0 0 rgba(255,255,255,0.8); }
+    40%  { box-shadow: 0 0 0 20px rgba(255,255,255,0); }
+    100% { box-shadow: 0 0 0 0 rgba(255,255,255,0); }
+  }
+  .sprint-flash { animation: sprint-pulse 0.6s ease-out; }
+
   #status {
     font-size: 0.75rem;
     color: #555;
@@ -352,6 +359,18 @@
     <div>
       <div id="hr-updated">Not connected</div>
       <button id="hr-connect-btn" class="connect-btn">🫀 Connect Fitbit</button>
+    </div>
+  </div>
+</div>
+
+<!-- Sprint trainer -->
+<div class="panel">
+  <h2>Sprint Trainer</h2>
+  <div style="display:flex;align-items:center;gap:14px;">
+    <button id="sprint-btn" class="connect-btn" style="font-size:1.1rem;padding:12px 20px!important;">🚀</button>
+    <div>
+      <div id="sprint-status" style="font-size:0.8rem;color:var(--subtle);transition:color 1.2s;">Random triggers while running</div>
+      <div id="sprint-countdown" style="font-size:0.75rem;color:var(--subtle);margin-top:2px;transition:color 1.2s;"></div>
     </div>
   </div>
 </div>
@@ -982,7 +1001,10 @@ setInterval(tickHeatScore, 5000);
 
 // Called by GPS and HR code when data arrives to switch into auto mode
 function checkAutoMode() {
+  const wasAuto = autoMode;
   if (currentHR > 0 && currentSpeedKmh >= 0) autoMode = true;
+  // Kick off random sprint scheduling the moment auto mode first activates
+  if (autoMode && !wasAuto) scheduleNextRandomSprint();
 }
 
 // Override updateBandDisplay to also update the new heat pane
@@ -1234,6 +1256,140 @@ document.getElementById('hr-connect-btn').addEventListener('click', function() {
     document.getElementById('hr-updated').textContent = 'Sign-in error: ' + e.message;
   }
 })();
+
+// ─────────────────────────────────────────────
+// SPRINT TRAINER
+// ─────────────────────────────────────────────
+
+let sprintRandomTimer = null;
+
+function triggerSprint() {
+  if (!audioCtx) return;
+  document.getElementById('sprint-status').textContent = '🚀 SPRINT!';
+
+  // Visual pulse on the heat pane
+  const heatPane = document.querySelector('.heat-pane');
+  heatPane.classList.remove('sprint-flash');
+  void heatPane.offsetWidth;   // force reflow to restart animation
+  heatPane.classList.add('sprint-flash');
+  setTimeout(() => heatPane.classList.remove('sprint-flash'), 700);
+
+  // 1. Play the engine spool-up sound
+  playSprintSound();
+
+  // 2. Slam reverb to 100% immediately
+  const t = audioCtx.currentTime;
+  wetGain.gain.cancelScheduledValues(t);
+  dryGain.gain.cancelScheduledValues(t);
+  wetGain.gain.setValueAtTime(1.0, t);
+  dryGain.gain.setValueAtTime(0.2, t);
+
+  // 3. Ease back to heat-score-appropriate reverb over 10 seconds.
+  //    setTargetAtTime(target, startTime, timeConstant) decays exponentially.
+  //    Time constant 2.5s means ~95% settled after 7.5s (3 × 2.5s).
+  //    We start the settle after the sound effect finishes (2.5s).
+  const target = getEffects(smoothedScore);
+  wetGain.gain.setTargetAtTime(target.reverb,         t + 2.5, 2.5);
+  dryGain.gain.setTargetAtTime(1 - target.reverb * 0.5, t + 2.5, 2.5);
+
+  // Reset status after 12 seconds
+  setTimeout(() => {
+    document.getElementById('sprint-status').textContent = 'Random triggers while running';
+    scheduleNextRandomSprint();
+  }, 12000);
+}
+
+function playSprintSound() {
+  // Synthesise a spaceship engine spool-up entirely in Web Audio.
+  // Goes straight to destination — bypasses the main filter chain
+  // so it always sounds full and powerful regardless of heat score.
+  const ctx = audioCtx;
+  const now  = ctx.currentTime;
+  const dur  = 2.5;
+
+  // Master gain for the whole effect with amplitude envelope
+  const envGain = ctx.createGain();
+  envGain.gain.setValueAtTime(0, now);
+  envGain.gain.linearRampToValueAtTime(0.5, now + 0.4);   // build up
+  envGain.gain.setValueAtTime(0.5, now + dur - 0.4);
+  envGain.gain.linearRampToValueAtTime(0, now + dur);      // fade out
+  envGain.connect(ctx.destination);
+
+  // Oscillator 1 — main engine tone (sawtooth, harsh and metallic)
+  const osc1 = ctx.createOscillator();
+  osc1.type = 'sawtooth';
+  osc1.frequency.setValueAtTime(40, now);
+  osc1.frequency.exponentialRampToValueAtTime(180, now + dur);
+  osc1.connect(envGain);
+  osc1.start(now); osc1.stop(now + dur);
+
+  // Oscillator 2 — slightly detuned for thickness / beating effect
+  const osc2 = ctx.createOscillator();
+  osc2.type = 'sawtooth';
+  osc2.frequency.setValueAtTime(43, now);
+  osc2.frequency.exponentialRampToValueAtTime(186, now + dur);
+  const osc2Gain = ctx.createGain();
+  osc2Gain.gain.value = 0.6;
+  osc2.connect(osc2Gain);
+  osc2Gain.connect(envGain);
+  osc2.start(now); osc2.stop(now + dur);
+
+  // Sub bass — pure sine for the deep chest-thumping low end
+  const sub = ctx.createOscillator();
+  sub.type = 'sine';
+  sub.frequency.setValueAtTime(28, now);
+  sub.frequency.exponentialRampToValueAtTime(80, now + dur);
+  const subGain = ctx.createGain();
+  subGain.gain.value = 1.2;
+  sub.connect(subGain);
+  subGain.connect(envGain);
+  sub.start(now); sub.stop(now + dur);
+
+  // Filtered noise — adds mechanical texture / air turbulence feel
+  const noiseLen    = Math.floor(ctx.sampleRate * dur);
+  const noiseBuf    = ctx.createBuffer(1, noiseLen, ctx.sampleRate);
+  const noiseData   = noiseBuf.getChannelData(0);
+  for (let i = 0; i < noiseLen; i++) noiseData[i] = Math.random() * 2 - 1;
+  const noise       = ctx.createBufferSource();
+  noise.buffer      = noiseBuf;
+  const noiseFilter = ctx.createBiquadFilter();
+  noiseFilter.type  = 'bandpass';
+  noiseFilter.frequency.setValueAtTime(80, now);
+  noiseFilter.frequency.linearRampToValueAtTime(300, now + dur);
+  noiseFilter.Q.value = 1.5;
+  const noiseGain   = ctx.createGain();
+  noiseGain.gain.value = 0.25;
+  noise.connect(noiseFilter);
+  noiseFilter.connect(noiseGain);
+  noiseGain.connect(envGain);
+  noise.start(now); noise.stop(now + dur);
+}
+
+// Random sprint trigger — only fires when actually running
+function scheduleNextRandomSprint() {
+  clearTimeout(sprintRandomTimer);
+  if (!autoMode || currentSpeedKmh < 5) return;
+
+  // Random delay between 4 and 10 minutes
+  const minMs = 4  * 60 * 1000;
+  const maxMs = 10 * 60 * 1000;
+  const delay = minMs + Math.random() * (maxMs - minMs);
+  const mins  = Math.round(delay / 60000);
+
+  document.getElementById('sprint-countdown').textContent =
+    `Next random sprint in ~${mins} min`;
+
+  sprintRandomTimer = setTimeout(() => {
+    // Only fire if still running when the timer goes off
+    if (autoMode && currentSpeedKmh >= 5) {
+      triggerSprint();
+    } else {
+      scheduleNextRandomSprint();
+    }
+  }, delay);
+}
+
+document.getElementById('sprint-btn').addEventListener('click', triggerSprint);
 
 // Initial display
 updateBandDisplay(0);
